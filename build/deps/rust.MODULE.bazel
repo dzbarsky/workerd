@@ -11,20 +11,19 @@ RUST_TARGET_TRIPLES = [
 ]
 
 # rules_rust
-bazel_dep(name = "rules_rust", version = "0.68.1")
+bazel_dep(name = "rules_rs", version = "0.0.40")
 
-# Under Bazel 9, Rust coverage is broken when using experimental_split_coverage_postprocessing.
-# TODO(cleanup): https://github.com/bazelbuild/rules_rust/pull/3812 should fix this, we're using
-# that commit for now. Switch back to regular release once resolved.
-archive_override(
-    module_name = "rules_rust",
-    integrity = "sha256-dtn87CNPspDl5xEfAGEl0eQ4HBf07vpxIdMNPRHqMqM=",
-    strip_prefix = "bazelbuild-rules_rust-cb9d412",
-    type = "tgz",
-    url = "https://github.com/bazelbuild/rules_rust/tarball/cb9d412afdb95578bd533b60483eecb373119c36",
+rules_rust = use_extension("@rules_rs//rs/experimental:rules_rust.bzl", "rules_rust")
+rules_rust.patch(
+    # Under Bazel 9, Rust coverage is broken when using experimental_split_coverage_postprocessing.
+    # TODO(cleanup): https://github.com/bazelbuild/rules_rust/pull/3812 should fix this, we're using
+    # that commit for now. Switch back to regular release once resolved.
+    patches = ["//:patches/rules_rust/coverage.patch"],
 )
 
-rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
+use_repo(rules_rust, "rules_rust")
+
+rust = use_extension("@rules_rs//rs/experimental:rules_rust_reexported_extensions.bzl", "rust")
 rust.toolchain(
     allocator_library = "@rules_rust//ffi/rs:empty",
     edition = "2024",
@@ -48,14 +47,6 @@ use_repo(rust, "rust_toolchains")
 
 register_toolchains("@rust_toolchains//:all")
 
-crate_repositories = use_extension("//deps/rust:extension.bzl", "crate_repositories")
-use_repo(
-    crate_repositories,
-    "crates_vendor",
-    # Needed to retrieve lol-html header
-    "crates_vendor__lol_html_c_api-1.3.1",
-)
-
 # rust-based lolhtml dependency, including the API header.
 # Presented as a separate repository to allow overrides.
 new_local_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:local.bzl", "new_local_repository")
@@ -73,3 +64,33 @@ inject_repo(
     http,
     **{"crates.io": "crates_vendor"}
 )
+
+crate = use_extension("@rules_rs//rs:extensions.bzl", "crate")
+crate.annotation(
+    additive_build_file_content = """exports_files(["include/lol_html.h"])""",
+    crate = "lol_html_c_api",
+    strip_prefix = "c-api",
+)
+crate.from_cargo(
+    # TODO(zbarsky): This name is a bit misleading now that we don't vendor.
+    # We can clean it up as a followup.
+    name = "crates_vendor",
+    cargo_lock = "//deps/rust:Cargo.lock",
+    cargo_toml = "//deps/rust:Cargo.toml",
+    platform_triples = RUST_TARGET_TRIPLES,
+)
+use_repo(
+    crate,
+    "crates_vendor",
+    # Needed to retrieve lol-html header
+    "crates_vendor__lol_html_c_api-1.3.1",
+)
+
+http.archive(
+    name = "workerd-cxx",
+    sha256 = "7ddce8e81d0b81adf6f07f18376a6fea9dca42e6b03b2fcf703c62196c270ad0",
+    strip_prefix = "cloudflare-workerd-cxx-916f0e7",
+    type = "tgz",
+    url = "https://github.com/cloudflare/workerd-cxx/tarball/916f0e7be8f1d43fe5ece1b72edd3c5844243d7b",
+)
+use_repo(http, "workerd-cxx")
